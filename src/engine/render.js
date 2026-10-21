@@ -43,7 +43,7 @@ async function loadFonts(hand, text) {
       link.addEventListener('error', r, { once: true });
       setTimeout(r, 6000);
     });
-  const keys = new Set([...hand.latin, ...hand.cjk, hand.head, hand.headCjk]);
+  const keys = new Set([...hand.latin, ...hand.cjk]);
   const chars = [...new Set(text.replace(/\s/g, ''))].join('') || 'a';
   const jobs = [...keys].map((k) => document.fonts.load(`40px "${FONTS[k].family}"`, chars).catch(() => null));
   await Promise.race([Promise.all(jobs), new Promise((r) => setTimeout(r, 10000))]);

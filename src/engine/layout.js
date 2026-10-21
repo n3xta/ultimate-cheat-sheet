@@ -136,7 +136,8 @@ function plantMistakes(units, rate, rng, hanPool) {
 function prepareUnits(units, role, P, rng) {
   const { hand, mess, measure, stacks } = P;
   for (const u of units) {
-    const latinKey = role === 'body' ? pickMix(rng, hand.latin, hand.mix) : hand.head;
+    // Headings are the same pen and hand as the body, just bigger.
+    const latinKey = role === 'body' ? pickMix(rng, hand.latin, hand.mix) : hand.latin[0];
     const slant = hand.slant + rng.gauss() * 0.04 * (0.3 + mess);
     u.wordDy = rng.gauss() * 0.035 * mess;
     u.em = 0;
@@ -147,7 +148,7 @@ function prepareUnits(units, role, P, rng) {
       } else if (g.cls === 'arrow') {
         g.p = { adv: 1.1 + 0.35 * rng() };
       } else {
-        const key = g.cls === 'cjk' ? (role === 'body' ? pickMix(rng, hand.cjk, hand.cjkMix) : hand.headCjk) : latinKey;
+        const key = g.cls === 'cjk' ? (role === 'body' ? pickMix(rng, hand.cjk, hand.cjkMix) : hand.cjk[0]) : latinKey;
         const F = FONTS[key];
         const { w: raw, asc } = measure(stacks[key], g.ch);
         const sc = 1 + rng.gauss() * (0.025 + 0.06 * mess);
@@ -194,10 +195,10 @@ export function prepare(blocks, P) {
     const role = b.type === 'title' ? 'title' : b.type === 'h' ? 'head' : 'body';
     const out = { ...b, units: units(b.runs, role) };
     if (role === 'title') {
-      out.k = 1.9;
+      out.k = 2.2;
       out.deco = 'dbl';
     } else if (role === 'head') {
-      out.k = 1.26 + rng.gauss() * 0.04;
+      out.k = 1.42 + rng.gauss() * 0.05;
       out.deco = rng.pick(HEAD_DECOS);
     } else out.k = 1;
     if (b.marker) {
@@ -360,7 +361,7 @@ export function layoutSheet(prep, o) {
           ch: g.ch, key: p.key, size: size * F.scale, sc: p.sc, sx: squeeze, raw: p.raw, page: line.page,
           x, y: baseAt(line, x) + (u.wordDy + p.dy + (F.dy || 0)) * size,
           rot: p.rot, skew: p.skew, alpha: p.alpha, light: p.light, dbl: p.dbl,
-          bold: !!(st.bold || L.bold), ink, over: g.over, asc: p.asc,
+          bold: !!st.bold, ink, over: g.over, asc: p.asc,
         });
         if (!st.mistake) placed++;
       }
@@ -408,7 +409,6 @@ export function layoutSheet(prep, o) {
   const ctxFor = (b, extra) => ({
     k: b.k || 1, full: false, first: 0, indent: 0, rindent: 0, count: 0,
     ink: (b.type === 'h' || b.type === 'title') && o.colorHeads ? 'accent' : 'ink',
-    bold: b.type === 'h' || b.type === 'title',
     deco: b.deco || null,
     ...extra,
   });
