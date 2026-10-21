@@ -5,7 +5,7 @@
 // re-run layoutSheet() at many sizes cheaply while hunting for the largest
 // size that still crams everything onto one page.
 
-import { makeRng } from './rng.js';
+import { makeRng, makeNoise2D } from './rng.js';
 import { FONTS } from './presets.js';
 
 const IS_CJK = /[⺀-鿿豈-﫿︰-﹏＀-￯]/;
@@ -240,7 +240,9 @@ export function layoutSheet(prep, o) {
   const gutters = new Map(); // left column -> [{ y0, dx }]
   const hasGutter = (c) => local(c) < o.cols - 1;
   let zigSign = rng() < 0.5 ? 1 : -1;
+  let chunkInset = 0;
   function newChunk() {
+    chunkInset = Math.abs(rng.gauss()) * 0.4 * o.mess;
     if (!hasGutter(col)) return;
     const maxShift = colW * 0.1 * o.zig;
     zigSign = rng() < 0.75 ? -zigSign : zigSign;
@@ -279,6 +281,16 @@ export function layoutSheet(prep, o) {
     return true;
   }
 
+  // Where a hand starts each line: a slow drift down the column (the margin
+  // creeps in and out), a per-chunk inset, and a jitter on every line. Lines
+  // also stop a little short of the edge at random. All in em.
+  const drift = makeNoise2D(o.seed ^ 0x2545f491);
+  function lineStart(size) {
+    const d = drift(col * 7.31, y / (size * o.lineH * 9));
+    const off = 1.3 * o.warp * (d + 0.5) + chunkInset + rng.gauss() * (0.12 + 0.55 * o.mess);
+    return Math.max(-0.3, off) * size;
+  }
+
   function openLine(L) {
     let size = sizeAt(L.k), lh = size * o.lineH;
     if (y + lh > bottom) {
@@ -292,8 +304,8 @@ export function layoutSheet(prep, o) {
     const [left, right] = L.full ? [o.margin, o.margin + contentW] : edges(y, y + lh);
     const indent = (L.count === 0 ? L.first : L.indent) * size;
     const line = {
-      x0: left + indent + rng.gauss() * size * 0.1 * o.mess,
-      xEnd: right - L.rindent * size,
+      x0: left + indent + (L.full ? 0 : lineStart(size)),
+      xEnd: right - L.rindent * size - (L.full ? 0 : Math.abs(rng.gauss()) * 0.25 * o.mess * size),
       left, right,
       yTop: y, base: y + size * 0.8, size, lh, col, page: pageOf(col),
       slope: pageSlope + rng.gauss() * 0.007 * o.warp,
