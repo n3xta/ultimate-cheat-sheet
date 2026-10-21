@@ -144,13 +144,31 @@ function drawGlyphs(ctx, glyphs, stacks, warp, palette) {
   ctx.globalAlpha = 1;
 }
 
+// Lay the finished pages out for the preview: portrait pages side by side,
+// landscape ones stacked, each with a soft shadow. Downloads use the pages.
+function compose(out, pages) {
+  const W = pages[0].width, H = pages[0].height;
+  const pad = Math.round(Math.max(W, H) * 0.02), gap = pad * 2, n = pages.length;
+  const across = n > 1 && W < H;
+  out.width = (across ? W * n + gap * (n - 1) : W) + pad * 2;
+  out.height = (across || n === 1 ? H : H * n + gap * (n - 1)) + pad * 2;
+  const ctx = out.getContext('2d');
+  ctx.clearRect(0, 0, out.width, out.height);
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+  ctx.shadowBlur = pad * 0.8;
+  ctx.shadowOffsetY = pad * 0.2;
+  pages.forEach((pg, i) => ctx.drawImage(pg, pad + (across ? i * (W + gap) : 0), pad + (across ? 0 : i * (H + gap))));
+  ctx.shadowColor = 'transparent';
+}
+
 export async function renderSheet(out, text, s) {
   const t0 = performance.now();
   const page = PAGES[s.page];
   const hand = HANDS[s.hand];
   const pen = PENS[s.pen];
+  const pages = s.pages === 2 ? 2 : 1;
   let dpi = s.dpi;
-  const px = (d) => Math.round((page.w * d) / 25.4) * Math.round((page.h * d) / 25.4);
+  const px = (d) => Math.round((page.w * d) / 25.4) * Math.round((page.h * d) / 25.4) * pages;
   while (px(dpi) > MAX_PIXELS && dpi > 100) dpi -= 25;
   const mm = dpi / 25.4;
   const W = Math.round(page.w * mm), H = Math.round(page.h * mm);
@@ -164,7 +182,7 @@ export async function renderSheet(out, text, s) {
   const blocks = parse(text);
   const prep = prepare(blocks, { hand, mess, mistakes: s.mistakes / 100, seed: s.seed, measure: makeMeasure(), stacks });
   const lo = {
-    W, H, margin: page.margin * mm, gap: 2.4 * mm, cols: s.cols, lineH: s.lineH, cram: s.cram,
+    W, H, margin: page.margin * mm, gap: 2.4 * mm, cols: s.cols, pages, lineH: s.lineH, cram: s.cram, zig: s.zig / 100,
     warp: warpAmt, mess, seed: s.seed, divider: s.divider, colorHeads: s.colorHeads && s.accent !== 'same',
   };
   const minPx = 2.5 * pt, maxPx = s.maxPt * pt;
@@ -174,31 +192,49 @@ export async function renderSheet(out, text, s) {
   const rng = makeRng(s.seed ^ 0x9e3779b9);
   const nx = makeNoise2D(s.seed ^ 0x51), ny = makeNoise2D(s.seed ^ 0x77);
   const wA = warpAmt * em * 0.6, wP = em * 22;
-  const warp = (x, y) => [x + wA * nx(x / wP, y / wP), y + wA * ny(x / wP, y / wP)];
+  const warpFor = (p) => (x, y) => {
+    const u = (x + p * W * 1.7) / wP, v = y / wP;
+    return [x + wA * nx(u, v), y + wA * ny(u, v)];
+  };
   const inkRgb = s.pen === 'pencil' ? GRAPHITE : INKS[s.ink].rgb;
   const palette = makePalette(inkRgb, ACCENTS[s.accent].rgb || inkRgb);
-  const env = { rng, warp, palette, marker: MARKERS[s.marker].rgb, amount: inkAmt };
+  // Without a highlighter the writer underlines instead.
+  const marks = s.highlighter
+    ? L.marks
+    : L.marks.map((m) => (m.type === 'hl' ? { ...m, type: 'ul' } : m.type === 'hd' && m.deco === 'hl' ? { ...m, deco: 'ul' } : m));
+  const pageOf = (m) => m.page ?? (m.line ? m.line.page : 0);
 
-  const [paper, pctx] = layer('paper', W, H);
-  drawPaper(pctx, W, H, PAPERS[s.paper], dpi, rng);
-  const [marker, mctx] = layer('marker', W, H);
-  drawHighlights(mctx, L.marks, env);
-  const [ink, ictx] = layer('ink', W, H);
-  drawGlyphs(ictx, L.glyphs, stacks, warp, palette);
-  drawPenMarks(ictx, L.marks, env);
-  drawBlots(ictx, L.glyphs, env);
-  processInk(ictx, W, H, { pen, em, mess, rng });
-  smudge(ink, L.glyphs, env);
+  const finished = [];
+  for (let p = 0; p < pages; p++) {
+    const warp = warpFor(p);
+    const env = { rng, warp, palette, marker: MARKERS[s.marker].rgb, amount: inkAmt };
+    const pageGlyphs = L.glyphs.filter((g) => g.page === p);
+    const pageMarks = marks.filter((m) => pageOf(m) === p);
 
-  pctx.globalCompositeOperation = 'multiply';
-  pctx.drawImage(marker, 0, 0);
-  pctx.drawImage(ink, 0, 0);
-  pctx.globalCompositeOperation = 'source-over';
-  age(pctx, W, H, s.age / 100, dpi, rng);
-  finish(out, paper, s.finish, rng);
+    const [paper, pctx] = layer('paper', W, H);
+    drawPaper(pctx, W, H, PAPERS[s.paper], dpi, rng);
+    const [marker, mctx] = layer('marker', W, H);
+    drawHighlights(mctx, pageMarks, env);
+    const [ink, ictx] = layer('ink', W, H);
+    drawGlyphs(ictx, pageGlyphs, stacks, warp, palette);
+    drawPenMarks(ictx, pageMarks, env);
+    drawBlots(ictx, pageGlyphs, env);
+    processInk(ictx, W, H, { pen, em, mess, rng });
+    smudge(ink, pageGlyphs, env);
+
+    pctx.globalCompositeOperation = 'multiply';
+    pctx.drawImage(marker, 0, 0);
+    pctx.drawImage(ink, 0, 0);
+    pctx.globalCompositeOperation = 'source-over';
+    age(pctx, W, H, s.age / 100, dpi, rng);
+    const [fin] = layer('fin' + p, W, H);
+    finish(fin, paper, s.finish, rng);
+    finished.push(fin);
+  }
+  compose(out, finished);
 
   return {
-    W, H, dpi,
+    W, H, dpi, pages: finished,
     pt: em / pt,
     overflow: L.overflow,
     placed: L.placed,

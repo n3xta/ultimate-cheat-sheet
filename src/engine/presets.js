@@ -85,14 +85,15 @@ export const MARKERS = {
   blue: { label: '蓝', rgb: [120, 204, 255] },
 };
 
-// rule: grid | lines | dots | none. Colours are drawn before the grain pass.
+// rule: grid | lines | dots | none. Colours are drawn before the grain pass;
+// `clean` paper skips grain and mottling so it stays pure white.
 export const PAPERS = {
   grid: { label: '方格纸', base: '#fbfbf7', rule: 'grid', ink: 'rgba(84, 132, 200, 0.30)', step: 5 },
   lines: { label: '横线本', base: '#fcfbf6', rule: 'lines', ink: 'rgba(84, 132, 200, 0.40)', step: 6, margin: 'rgba(226, 70, 70, 0.45)' },
   dots: { label: '点阵', base: '#fbfaf6', rule: 'dots', ink: 'rgba(90, 92, 110, 0.45)', step: 5 },
   legal: { label: '黄拍纸', base: '#fbf2a4', rule: 'lines', ink: 'rgba(90, 140, 205, 0.5)', step: 7, margin: 'rgba(220, 70, 70, 0.55)' },
   kraft: { label: '牛皮纸', base: '#cfae7c', rule: 'none', fibers: true },
-  blank: { label: '白纸', base: '#f9f8f3', rule: 'none' },
+  blank: { label: '白纸', base: '#ffffff', rule: 'none', clean: true },
 };
 
 export const PAGES = {

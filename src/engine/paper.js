@@ -65,6 +65,7 @@ export function drawPaper(ctx, W, H, P, dpi, rng) {
       }
   }
 
+  if (P.clean) return;
   const img = ctx.getImageData(0, 0, W, H);
   const d = img.data;
   const mott = noiseTile(rng, mm * 14, 512), md = mott.data, ms = mott.size;

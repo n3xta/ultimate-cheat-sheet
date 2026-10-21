@@ -4,8 +4,8 @@ import { HANDS, PENS, INKS, ACCENTS, MARKERS, PAPERS, PAGES } from './engine/pre
 import { SAMPLES } from './samples.js';
 
 const DEFAULTS = {
-  hand: 'rush', pen: 'gel', ink: 'blueblack', accent: 'red', marker: 'yellow', paper: 'grid', page: 'card46',
-  cols: 3, maxPt: 6, fit: true, lineH: 1.08, cram: 0.12, colorHeads: true, divider: true,
+  hand: 'rush', pen: 'gel', ink: 'blueblack', accent: 'red', highlighter: true, marker: 'yellow', paper: 'grid', page: 'card46',
+  cols: 3, pages: 1, maxPt: 6, fit: true, lineH: 1.08, cram: 0.12, zig: 40, colorHeads: true, divider: true,
   mess: 55, warp: 45, blots: 35, mistakes: 35, age: 20,
   finish: 'flat', dpi: 300, seed: 20261021,
 };
@@ -21,7 +21,8 @@ const GROUPS = [
       { id: 'pen', label: '笔', type: 'select', options: labels(PENS) },
       { id: 'ink', label: '墨色', type: 'swatch', options: INKS },
       { id: 'accent', label: '重点色', type: 'swatch', options: ACCENTS },
-      { id: 'marker', label: '荧光笔', type: 'swatch', options: MARKERS },
+      { id: 'highlighter', label: '用荧光笔（关掉后改画下划线）', type: 'check' },
+      { id: 'marker', label: '荧光笔颜色', type: 'swatch', options: MARKERS },
       { id: 'paper', label: '纸', type: 'select', options: labels(PAPERS) },
       { id: 'page', label: '尺寸', type: 'select', options: labels(PAGES) },
     ],
@@ -30,9 +31,11 @@ const GROUPS = [
     title: '排版',
     items: [
       { id: 'cols', label: '分栏', type: 'range', min: 1, max: 5, step: 1, fmt: (v) => `${v} 栏` },
+      { id: 'pages', label: '页数', type: 'select', num: true, options: [[1, '1 页'], [2, '2 页（正反面）']] },
       { id: 'maxPt', label: '字号上限', type: 'range', min: 3, max: 14, step: 0.5, fmt: (v) => `${v} pt` },
       { id: 'lineH', label: '行距', type: 'range', min: 0.9, max: 1.6, step: 0.02, fmt: (v) => v.toFixed(2) },
       { id: 'cram', label: '越写越小', type: 'range', min: 0, max: 0.5, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
+      { id: 'zig', label: '分栏错位', type: 'range', min: 0, max: 100, step: 1 },
       { id: 'fit', label: '自动缩小，全部塞进一页', type: 'check' },
       { id: 'colorHeads', label: '小节标题用重点色', type: 'check' },
       { id: 'divider', label: '手画分栏线', type: 'check' },
@@ -148,12 +151,13 @@ function control(it) {
   return el('div', { class: 'ctl wide' }, el('span', { class: 'lbl' }, it.label), group);
 }
 
-function syncInkLock() {
+function syncLocks() {
   const pencil = state.pen === 'pencil';
   for (const b of refs.ink.children) {
     b.disabled = pencil;
     b.title = pencil ? '铅笔固定是石墨色' : '';
   }
+  for (const b of refs.marker.children) b.disabled = !state.highlighter;
 }
 
 const controls = $('controls');
@@ -162,7 +166,7 @@ for (const g of GROUPS) {
   for (const it of g.items) fs.append(control(it));
   controls.append(fs);
 }
-syncInkLock();
+syncLocks();
 
 for (const [k, s] of Object.entries(SAMPLES)) sampleEl.append(el('option', { value: k }, '示例：' + s.label));
 sampleEl.append(el('option', { value: 'custom' }, '我自己的内容'));
@@ -170,7 +174,7 @@ sampleEl.value = saved && saved.sample in SAMPLES ? saved.sample : saved && save
 textEl.value = saved && typeof saved.text === 'string' ? saved.text : (SAMPLES[sampleEl.value] || SAMPLES.prob).text;
 
 function changed(id) {
-  if (id === 'pen') syncInkLock();
+  if (id === 'pen' || id === 'highlighter') syncLocks();
   if (id === 'ink') {
     // the "same as ink" accent chip shows the ink colour
     const same = [...refs.accent.children].find((c) => c.textContent.includes(ACCENTS.same.label));
@@ -232,7 +236,7 @@ async function run() {
 function showStatus(r) {
   const parts = [
     `${PAGES[state.page].label} · ${r.W}×${r.H} px (${r.dpi} dpi)`,
-    `${state.cols} 栏`,
+    `${r.pages.length} 页 × ${state.cols} 栏`,
     `字号 ${r.pt.toFixed(1)} pt`,
     `${r.placed.toLocaleString()} 字`,
     `${(r.ms / 1000).toFixed(1)} 秒`,
@@ -302,23 +306,28 @@ downloadsP.then((d) => {
   if (d === null) for (const b of dlButtons) b.hidden = true;
 });
 
+// Two-page sheets save as two files (front and back), one prompt each.
 async function download(type) {
   const ext = type === 'image/png' ? 'png' : 'jpg';
-  const name = `cheatsheet-${state.seed}.${ext}`;
-  const blob = await new Promise((r) => sheet.toBlob(r, type, 0.92));
-  if (!blob) return;
+  const pages = last ? last.pages : [sheet];
   const d = await downloadsP;
-  if (d) {
-    try {
-      await d.save({ filename: name, data: blob });
-    } catch (e) {
-      if (e && e.code !== 'declined') statusEl.textContent = '没能保存：' + (e.message || e.code);
+  for (let i = 0; i < pages.length; i++) {
+    const name = `cheatsheet-${state.seed}${pages.length > 1 ? '-p' + (i + 1) : ''}.${ext}`;
+    const blob = await new Promise((r) => pages[i].toBlob(r, type, 0.92));
+    if (!blob) return;
+    if (d) {
+      try {
+        await d.save({ filename: name, data: blob });
+      } catch (e) {
+        if (e && e.code !== 'declined') statusEl.textContent = '没能保存：' + (e.message || e.code);
+        return;
+      }
+      continue;
     }
-    return;
+    const a = el('a', { href: URL.createObjectURL(blob), download: name });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
-  const a = el('a', { href: URL.createObjectURL(blob), download: name });
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 $('dl-png').addEventListener('click', () => download('image/png'));
 $('dl-jpg').addEventListener('click', () => download('image/jpeg'));

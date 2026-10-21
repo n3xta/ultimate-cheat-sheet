@@ -194,7 +194,7 @@ export function drawPenMarks(ctx, marks, env) {
       }
       case 'vline':
         ctx.globalAlpha = 0.7;
-        stroke(ctx, wob(m.x, m.y1, m.x + rng.gauss() * sz * 0.6, m.y2, sz * 0.2, sz * 4, rng, warp), sz * 0.055);
+        stroke(ctx, m.pts.map(([x, y]) => warp(x, y)), sz * 0.055);
         break;
     }
   }

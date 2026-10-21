@@ -218,23 +218,64 @@ export function layoutSheet(prep, o) {
   const contentW = o.W - 2 * o.margin;
   const colW = (contentW - (o.cols - 1) * o.gap) / o.cols;
   const top = o.margin, bottom = o.H - o.margin;
-  const colX = (c) => o.margin + c * (colW + o.gap);
-  let col = 0, y = top, colTop = top, overflow = false, placed = 0;
+  const totalCols = o.cols * o.pages;
+  // `col` counts columns across pages; page 2 picks up where page 1 ends.
+  const local = (c) => c % o.cols;
+  const pageOf = (c) => Math.floor(c / o.cols);
+  const colX = (c) => o.margin + local(c) * (colW + o.gap);
+  let col = 0, y = top, titleBottom = top, overflow = false, placed = 0;
   let open = {};
+  const topOf = (c) => (pageOf(c) === 0 ? titleBottom : top);
   const pageSlope = rng.gauss() * 0.004 * o.warp;
   const bulletStyle = rng.pick(['dot', 'dot', 'dash', 'arrow']);
 
-  const progress = () => Math.min(1, (col + (y - colTop) / Math.max(1, bottom - colTop)) / o.cols);
+  const progress = () => Math.min(1, (col + (y - topOf(col)) / Math.max(1, bottom - topOf(col))) / totalCols);
   const sizeAt = (k) => o.basePx * k * (1 - o.cram * progress());
   const bodyLH = () => sizeAt(1) * o.lineH;
 
+  // Zigzag gutters: every chunk of text (a section, a box, a paragraph after
+  // a blank line) nudges its column's right edge one way or the other, and
+  // the next column's left edge follows it, so the split between columns
+  // steps back and forth with the content instead of running straight.
+  const gutters = new Map(); // left column -> [{ y0, dx }]
+  const hasGutter = (c) => local(c) < o.cols - 1;
+  let zigSign = rng() < 0.5 ? 1 : -1;
+  function newChunk() {
+    if (!hasGutter(col)) return;
+    const maxShift = colW * 0.1 * o.zig;
+    zigSign = rng() < 0.75 ? -zigSign : zigSign;
+    const dx = zigSign * maxShift * rng.range(0.3, 1);
+    const segs = gutters.get(col) || [];
+    if (segs.length && segs[segs.length - 1].y0 >= y - 0.5) segs[segs.length - 1].dx = dx;
+    else segs.push({ y0: y, dx });
+    gutters.set(col, segs);
+  }
+  // The neighbouring column's shift over [y0, y1]; the larger one wins so text never collides.
+  function shiftOver(c, y0, y1) {
+    const segs = gutters.get(c);
+    if (!segs) return 0;
+    let best = -Infinity;
+    for (let i = 0; i < segs.length; i++) {
+      const a = segs[i].y0, b = i + 1 < segs.length ? segs[i + 1].y0 : Infinity;
+      if (a < y1 && b > y0) best = Math.max(best, segs[i].dx);
+    }
+    return best === -Infinity ? 0 : best;
+  }
+  function edges(y0, y1) {
+    const left = colX(col) + (local(col) > 0 ? shiftOver(col - 1, y0, y1) : 0);
+    const segs = hasGutter(col) && gutters.get(col);
+    const right = colX(col) + colW + (segs ? segs[segs.length - 1].dx : 0);
+    return [left, right];
+  }
+
   function nextColumn() {
     col++;
-    if (col >= o.cols) {
+    if (col >= totalCols) {
       overflow = true;
       return false;
     }
-    y = colTop;
+    y = topOf(col);
+    newChunk();
     return true;
   }
 
@@ -248,13 +289,13 @@ export function layoutSheet(prep, o) {
       size = sizeAt(L.k);
       lh = size * o.lineH;
     }
-    const left = L.full ? o.margin : colX(col);
-    const width = L.full ? contentW : colW;
+    const [left, right] = L.full ? [o.margin, o.margin + contentW] : edges(y, y + lh);
     const indent = (L.count === 0 ? L.first : L.indent) * size;
     const line = {
       x0: left + indent + rng.gauss() * size * 0.1 * o.mess,
-      xEnd: left + width - L.rindent * size,
-      yTop: y, base: y + size * 0.8, size, lh, col,
+      xEnd: right - L.rindent * size,
+      left, right,
+      yTop: y, base: y + size * 0.8, size, lh, col, page: pageOf(col),
       slope: pageSlope + rng.gauss() * 0.007 * o.warp,
       waveA: size * 0.06 * o.warp * rng(),
       waveF: (2 * Math.PI) / (size * rng.range(5, 16)),
@@ -296,7 +337,7 @@ export function layoutSheet(prep, o) {
       } else if (!isSpace) {
         const F = FONTS[p.key];
         glyphs.push({
-          ch: g.ch, key: p.key, size: size * F.scale, sc: p.sc, sx: squeeze, raw: p.raw,
+          ch: g.ch, key: p.key, size: size * F.scale, sc: p.sc, sx: squeeze, raw: p.raw, page: line.page,
           x, y: baseAt(line, x) + (u.wordDy + p.dy + (F.dy || 0)) * size,
           rot: p.rot, skew: p.skew, alpha: p.alpha, light: p.light, dbl: p.dbl,
           bold: !!(st.bold || L.bold), ink, over: g.over, asc: p.asc,
@@ -352,15 +393,19 @@ export function layoutSheet(prep, o) {
     ...extra,
   });
 
+  newChunk();
   for (let bi = 0; bi < prep.length && !overflow; bi++) {
     const b = prep[bi];
-    const atTop = y <= colTop + 0.5;
+    const atTop = y <= topOf(col) + 0.5;
     if (b.type === 'gap') {
       if (!atTop) y += bodyLH() * 0.3;
+      newChunk();
     } else if (b.type === 'hr') {
       if (y + bodyLH() * 0.6 > bottom && !nextColumn()) break;
+      newChunk();
       const sz = sizeAt(1);
-      marks.push({ type: 'hr', x1: colX(col) + sz * 0.2, x2: colX(col) + colW - sz * 0.2, y: y + sz * 0.3, size: sz });
+      const [left, right] = edges(y, y + bodyLH() * 0.6);
+      marks.push({ type: 'hr', page: pageOf(col), x1: left + sz * 0.2, x2: right - sz * 0.2, y: y + sz * 0.3, size: sz });
       y += bodyLH() * 0.6;
     } else if (b.type === 'title' && bi === 0) {
       const L = ctxFor(b, { full: true });
@@ -368,11 +413,13 @@ export function layoutSheet(prep, o) {
       if (est < contentW) L.first = L.indent = ((contentW - est) * rng.range(0.12, 0.5)) / sizeAt(b.k);
       flow(b.units, L);
       y += bodyLH() * 0.45;
-      colTop = y;
+      titleBottom = y;
+      newChunk();
     } else if (b.type === 'h' || b.type === 'title') {
       if (!atTop) y += bodyLH() * 0.25;
       // Don't leave a heading orphaned at the bottom of a column.
       if (y + sizeAt(b.k) * o.lineH + bodyLH() * 1.5 > bottom && !nextColumn()) break;
+      newChunk();
       flow(b.units, ctxFor(b, {}));
       y += bodyLH() * 0.1;
     } else if (b.type === 'p') {
@@ -390,6 +437,7 @@ export function layoutSheet(prep, o) {
       }
     } else if (b.type === 'note') {
       if (!atTop) y += bodyLH() * 0.3;
+      newChunk();
       const L = ctxFor(b, { first: 0.45, indent: 0.45, rindent: 0.35 });
       const start = lines.length;
       for (const u of b.lines) {
@@ -398,14 +446,17 @@ export function layoutSheet(prep, o) {
       }
       const byCol = new Map();
       for (const ln of lines.slice(start)) {
-        const g = byCol.get(ln.col) || { y1: Infinity, y2: -Infinity, size: ln.size };
+        const g = byCol.get(ln.col) || { y1: Infinity, y2: -Infinity, x1: Infinity, x2: -Infinity, size: ln.size, page: ln.page };
         g.y1 = Math.min(g.y1, ln.yTop);
         g.y2 = Math.max(g.y2, ln.yTop + ln.lh);
+        g.x1 = Math.min(g.x1, ln.left);
+        g.x2 = Math.max(g.x2, ln.right);
         byCol.set(ln.col, g);
       }
-      for (const [c, g] of byCol)
-        marks.push({ type: 'box', x1: colX(c) + g.size * 0.08, x2: colX(c) + colW - g.size * 0.05, y1: g.y1 - g.size * 0.08, y2: g.y2 + g.size * 0.08, size: g.size, ink: 'ink' });
+      for (const g of byCol.values())
+        marks.push({ type: 'box', page: g.page, x1: g.x1 + g.size * 0.08, x2: g.x2 - g.size * 0.05, y1: g.y1 - g.size * 0.08, y2: g.y2 + g.size * 0.08, size: g.size, ink: 'ink' });
       y += bodyLH() * 0.35;
+      newChunk();
     }
   }
 
@@ -414,9 +465,25 @@ export function layoutSheet(prep, o) {
     else marks.push({ ...s, type: s.kind, ink: s.kind === 'red' ? 'accent' : 'ink' });
   }
   if (o.divider) {
-    const used = Math.min(col, o.cols - 1);
-    for (let c = 1; c <= used; c++)
-      marks.push({ type: 'vline', x: colX(c) - o.gap / 2, y1: colTop + o.basePx * 0.2, y2: bottom - o.basePx * 0.3, size: o.basePx, ink: 'ink' });
+    // One divider per gutter whose right-hand column got any text; it steps
+    // with the gutter's chunks, slanting across each change.
+    const last = Math.min(col, totalCols - 1);
+    for (let c = 0; c < last; c++) {
+      if (!hasGutter(c)) continue;
+      const xb = colX(c) + colW + o.gap / 2, sz = o.basePx;
+      const y0 = topOf(c) + sz * 0.2, y1 = bottom - sz * 0.3;
+      const segs = gutters.get(c) || [{ y0, dx: 0 }];
+      const pts = [];
+      const tr = sz * 0.5;
+      segs.forEach((g, i) => {
+        const a = Math.max(y0, g.y0), b = i + 1 < segs.length ? segs[i + 1].y0 : y1;
+        if (b <= a) return;
+        const from = i ? Math.min(b, a + tr) : a, to = i + 1 < segs.length ? Math.max(from, b - tr) : b;
+        for (let yy = from; yy < to; yy += sz * 3) pts.push([xb + g.dx + rng.gauss() * sz * 0.08, yy]);
+        pts.push([xb + g.dx, to]);
+      });
+      if (pts.length > 1) marks.push({ type: 'vline', page: pageOf(c), pts, size: sz, ink: 'ink' });
+    }
   }
 
   return { glyphs, marks, lines, overflow, placed, total: prep.totalChars, basePx: o.basePx };
