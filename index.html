@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>潦草小抄</title>
+    <meta name="claude:viewport-fit-sides" content="cover" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      id="hand-fonts"
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&family=Covered+By+Your+Grace&family=Gochi+Hand&family=Just+Another+Hand&family=Liu+Jian+Mao+Cao&family=Long+Cang&family=Ma+Shan+Zheng&family=Nanum+Pen+Script&family=Permanent+Marker&family=Reenie+Beanie&family=Rock+Salt&family=Zeyada&family=Zhi+Mang+Xing&display=swap"
+    />
+  </head>
+  <body>
+    <div class="app">
+      <header class="masthead">
+        <h1 class="brand"><span>潦草小抄</span></h1>
+        <p class="tagline">把整理好的笔记写成考前那张纸：字小、行密、墨乱、纸皱。改内容或参数，小抄会马上重写一遍。</p>
+      </header>
+
+      <section class="stage" aria-label="预览">
+        <div class="toolbar">
+          <button id="reroll" class="btn primary" type="button">换个写法</button>
+          <button id="zoom" class="btn" type="button" aria-pressed="false">原尺寸查看</button>
+          <span class="spacer"></span>
+          <button id="dl-png" class="btn" type="button">下载 PNG</button>
+          <button id="dl-jpg" class="btn" type="button">下载 JPG</button>
+        </div>
+        <div class="viewport fit" id="viewport">
+          <canvas id="sheet" width="874" height="1240" role="img" aria-label="生成的手写小抄"></canvas>
+          <canvas id="loupe" class="loupe" hidden></canvas>
+          <div class="busy" id="busy" hidden>正在写…</div>
+        </div>
+        <p class="status" id="status" aria-live="polite">正在加载手写字体…</p>
+      </section>
+
+      <aside class="panel">
+        <div class="field">
+          <div class="field-head">
+            <label for="text">内容</label>
+            <select id="sample" aria-label="换一份示例"></select>
+          </div>
+          <textarea id="text" spellcheck="false" rows="14"></textarea>
+          <p class="syntax">
+            <code># 标题</code><code>## 小节</code><code>- 要点</code><code>1. 编号</code><code>&gt; 方框</code><code>---</code>
+            <code>**粗**</code><code>==荧光==</code><code>__下划线__</code><code>!!圈红!!</code><code>~~划掉~~</code><code>-&gt; =&gt; &lt;=&gt; 箭头</code><code>X̄ 上划线</code>
+          </p>
+        </div>
+        <div id="controls"></div>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
