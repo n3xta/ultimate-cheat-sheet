@@ -234,7 +234,7 @@ export async function renderSheet(out, text, s) {
   compose(out, finished);
 
   return {
-    W, H, dpi, pages: finished,
+    W, H, dpi, pages: finished, sizeMm: [page.w, page.h],
     pt: em / pt,
     overflow: L.overflow,
     placed: L.placed,

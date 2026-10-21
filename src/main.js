@@ -2,6 +2,7 @@ import './style.css';
 import { renderSheet } from './engine/render.js';
 import { HANDS, PENS, INKS, ACCENTS, MARKERS, PAPERS, PAGES } from './engine/presets.js';
 import { SAMPLES } from './samples.js';
+import { pagesToPdf } from './pdf.js';
 
 const DEFAULTS = {
   hand: 'rush', pen: 'gel', ink: 'blueblack', accent: 'red', highlighter: true, marker: 'yellow', paper: 'grid', page: 'card46',
@@ -301,35 +302,46 @@ sheet.addEventListener('pointerleave', () => (loupe.hidden = true));
 // capability; on a normal page a plain download link works.
 const inViewer = !!(window.claude && window.claude.use);
 const downloadsP = inViewer ? window.claude.use('downloads').catch(() => null) : Promise.resolve(undefined);
-const dlButtons = [$('dl-png'), $('dl-jpg')];
+const dlButtons = [$('dl-png'), $('dl-jpg'), $('dl-pdf')];
 downloadsP.then((d) => {
   if (d === null) for (const b of dlButtons) b.hidden = true;
 });
 
-// Two-page sheets save as two files (front and back), one prompt each.
-async function download(type) {
-  const ext = type === 'image/png' ? 'png' : 'jpg';
-  const pages = last ? last.pages : [sheet];
+// Returns false when the viewer declined or saving failed, to stop a batch.
+async function saveFile(name, blob) {
   const d = await downloadsP;
-  for (let i = 0; i < pages.length; i++) {
-    const name = `cheatsheet-${state.seed}${pages.length > 1 ? '-p' + (i + 1) : ''}.${ext}`;
-    const blob = await new Promise((r) => pages[i].toBlob(r, type, 0.92));
-    if (!blob) return;
-    if (d) {
-      try {
-        await d.save({ filename: name, data: blob });
-      } catch (e) {
-        if (e && e.code !== 'declined') statusEl.textContent = '没能保存：' + (e.message || e.code);
-        return;
-      }
-      continue;
+  if (d) {
+    try {
+      await d.save({ filename: name, data: blob });
+    } catch (e) {
+      if (e && e.code !== 'declined') statusEl.textContent = '没能保存：' + (e.message || e.code);
+      return false;
     }
-    const a = el('a', { href: URL.createObjectURL(blob), download: name });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    return true;
+  }
+  const a = el('a', { href: URL.createObjectURL(blob), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  return true;
+}
+
+// Images save one file per page; the PDF holds every page at real paper size.
+async function download(type) {
+  const pages = last ? last.pages : [sheet];
+  const base = `cheatsheet-${state.seed}`;
+  if (type === 'application/pdf') {
+    const [w, h] = last ? last.sizeMm : [PAGES[state.page].w, PAGES[state.page].h];
+    await saveFile(`${base}.pdf`, await pagesToPdf(pages, w, h));
+    return;
+  }
+  const ext = type === 'image/png' ? 'png' : 'jpg';
+  for (let i = 0; i < pages.length; i++) {
+    const blob = await new Promise((r) => pages[i].toBlob(r, type, 0.92));
+    if (!blob || !(await saveFile(`${base}${pages.length > 1 ? '-p' + (i + 1) : ''}.${ext}`, blob))) return;
   }
 }
 $('dl-png').addEventListener('click', () => download('image/png'));
 $('dl-jpg').addEventListener('click', () => download('image/jpeg'));
+$('dl-pdf').addEventListener('click', () => download('application/pdf'));
 
 schedule(0);

@@ -291,15 +291,23 @@ export function layoutSheet(prep, o) {
     return Math.max(-0.3, off) * size;
   }
 
+  // Line height wanders too: a random bump per line plus a slow squeeze and
+  // release down the column. Never tighter than 82% of the set spacing.
+  function lineHeight(size) {
+    const slow = drift(col * 5.7 + 50, y / (size * o.lineH * 14));
+    const f = 1 + Math.max(-2, Math.min(2, rng.gauss())) * (0.03 + 0.12 * o.mess) + 0.08 * o.warp * slow;
+    return size * o.lineH * Math.max(0.82, f);
+  }
+
   function openLine(L) {
-    let size = sizeAt(L.k), lh = size * o.lineH;
+    let size = sizeAt(L.k), lh = lineHeight(size);
     if (y + lh > bottom) {
       if (L.full || !nextColumn()) {
         overflow = true;
         return null;
       }
       size = sizeAt(L.k);
-      lh = size * o.lineH;
+      lh = lineHeight(size);
     }
     const [left, right] = L.full ? [o.margin, o.margin + contentW] : edges(y, y + lh);
     const indent = (L.count === 0 ? L.first : L.indent) * size;
@@ -307,7 +315,7 @@ export function layoutSheet(prep, o) {
       x0: left + indent + (L.full ? 0 : lineStart(size)),
       xEnd: right - L.rindent * size - (L.full ? 0 : Math.abs(rng.gauss()) * 0.25 * o.mess * size),
       left, right,
-      yTop: y, base: y + size * 0.8, size, lh, col, page: pageOf(col),
+      yTop: y, base: y + size * 0.8 + (lh - size * o.lineH) * 0.5, size, lh, col, page: pageOf(col),
       slope: pageSlope + rng.gauss() * 0.007 * o.warp,
       waveA: size * 0.06 * o.warp * rng(),
       waveF: (2 * Math.PI) / (size * rng.range(5, 16)),
